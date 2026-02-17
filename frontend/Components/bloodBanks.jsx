@@ -1,0 +1,417 @@
+import React, { useEffect, useRef, useState } from "react";
+import * as THREE from "three";
+
+const API_BASE = "http://localhost:3000";
+
+export default function BloodBanks() {
+  const mountRef = useRef(null);
+
+  const [banks, setBanks] = useState([]);
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState({});
+  const [userLocation, setUserLocation] = useState(null);
+  const [sortOption, setSortOption] = useState("name");
+
+  /* ------------------ FETCH BANKS ------------------ */
+  useEffect(() => {
+    fetch(`${API_BASE}/api/banks`)
+      .then(r => r.json())
+      .then(d => setBanks(d || []))
+      .catch(console.error);
+  }, []);
+
+  /* ------------------ GEOLOCATION ------------------ */
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(pos => {
+      setUserLocation({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude
+      });
+    });
+  }, []);
+
+  /* ------------------ THREE.JS BACKGROUND ------------------ */
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el) return;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      60,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.z = 6;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000, 0);
+    el.appendChild(renderer.domElement);
+
+    const count = 180;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 16;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 8;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      color: 0xaa2b2b,
+      size: 0.12,
+      opacity: 0.85,
+      transparent: true
+    });
+
+    const points = new THREE.Points(geometry, material);
+    scene.add(points);
+
+    let frame = 0;
+    let raf;
+    const animate = () => {
+      frame += 0.01;
+      const arr = geometry.attributes.position.array;
+      for (let i = 0; i < count; i++) {
+        const idx = i * 3 + 1;
+        arr[idx] += Math.sin(frame + i) * 0.0008 - 0.002;
+        if (arr[idx] < -6) arr[idx] = 6;
+      }
+      geometry.attributes.position.needsUpdate = true;
+      renderer.render(scene, camera);
+      raf = requestAnimationFrame(animate);
+    };
+    animate();
+
+    const resize = () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+    };
+    window.addEventListener("resize", resize);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+      el.removeChild(renderer.domElement);
+      renderer.dispose();
+    };
+  }, []);
+
+  /* ------------------ HELPERS ------------------ */
+  const calcDistanceKm = (userLat, userLng, coords) => {
+    if (!coords) return null;
+    const [lng, lat] = coords;
+    const R = 6371;
+    const toRad = d => (d * Math.PI) / 180;
+    const dLat = toRad(lat - userLat);
+    const dLon = toRad(lng - userLng);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(userLat)) *
+        Math.cos(toRad(lat)) *
+        Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const fmt = n => (n || 0).toLocaleString();
+
+  const filteredBanks = banks
+    .filter(b => b.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortOption === "units") {
+        const sa = Object.values(a.stock).reduce((x, y) => x + y, 0);
+        const sb = Object.values(b.stock).reduce((x, y) => x + y, 0);
+        return sb - sa;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+  /* ------------------ UI ------------------ */
+  return (
+    <>
+      <style>{`
+        html, body {
+          height: auto !important;
+          overflow-y: auto !important;
+        }
+
+        .bb-page {
+          min-height:100vh;
+          background:
+            radial-gradient(circle at top left, rgba(255,180,180,0.35), transparent 45%),
+            linear-gradient(180deg, #ffe6e6 0%, #f7caca 45%, #f2b6b6 100%);
+          font-family: Inter, system-ui, -apple-system, Roboto;
+        }
+
+        .bb-bg {
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+        }
+
+        .bb-content {
+          position: relative;
+          z-index: 5;
+          max-width: 1560px;     /* same philosophy as Dashboard */
+          margin: 0 auto;
+          padding: 32px 22px 70px;
+        }
+
+
+        .bb-title {
+          text-align:center;
+          font-size:38px;
+          font-weight:800;
+          color:#7b1e1e;
+          margin-bottom:28px;
+        }
+
+        .bb-controls {
+          display: flex;
+          gap: 14px;
+          justify-content: center;
+          flex-wrap: wrap;
+          margin-bottom: 34px;
+          padding: 18px;
+          border-radius: 18px;
+
+          background: linear-gradient(
+            135deg,
+            rgba(183, 28, 28, 0.25),
+            rgba(255, 120, 120, 0.18)
+          );
+          backdrop-filter: blur(14px) saturate(140%);
+          box-shadow: 0 18px 45px rgba(183, 28, 28, 0.25);
+        }
+
+        /* Search + select base */
+        .bb-controls input,
+        .bb-controls select {
+          padding: 14px 18px;
+          border-radius: 14px;
+          border: none;
+          outline: none;
+
+          font-size: 15px;
+          font-weight: 600;
+
+          min-height: 52px;
+          min-width: 260px;
+
+          color: #7b1e1e;
+
+          background: linear-gradient(
+            135deg,
+            rgba(255,255,255,0.95),
+            rgba(255,225,225,0.95)
+          );
+
+          box-shadow:
+            inset 0 0 0 1px rgba(183, 28, 28, 0.35),
+            0 10px 26px rgba(183, 28, 28, 0.25);
+
+          transition: all 0.25s ease;
+        }
+
+
+        /* Search wider */
+        .bb-controls input {
+          min-width: 300px;
+        }
+
+        /* Hover */
+        .bb-controls input:hover,
+        .bb-controls select:hover {
+          box-shadow:
+            inset 0 0 0 1px rgba(183, 28, 28, 0.5),
+            0 12px 30px rgba(183, 28, 28, 0.35);
+        }
+
+        /* Focus glow */
+        .bb-controls input:focus,
+        .bb-controls select:focus {
+          box-shadow:
+            inset 0 0 0 2px rgba(183, 28, 28, 0.75),
+            0 0 0 4px rgba(255, 120, 120, 0.35),
+            0 16px 40px rgba(183, 28, 28, 0.45);
+        }
+
+        /* Dropdown arrow color (modern browsers) */
+        .bb-controls select {
+          appearance: none;
+          cursor: pointer;
+
+          background-image:
+            url("data:image/svg+xml;utf8,<svg fill='%23b71c1c' height='20' viewBox='0 0 24 24' width='20' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>"),
+            linear-gradient(
+              135deg,
+              rgba(255,255,255,0.95),
+              rgba(255,225,225,0.95)
+            );
+
+          background-repeat: no-repeat, no-repeat;
+          background-position: right 16px center, center;
+          background-size: 18px, cover;
+
+          padding-right: 48px;
+        }
+
+        .bb-controls input:hover,
+        .bb-controls select:hover {
+          box-shadow:
+            inset 0 0 0 1px rgba(183, 28, 28, 0.55),
+            0 14px 34px rgba(183, 28, 28, 0.35);
+        }
+
+        .bb-controls input:focus,
+        .bb-controls select:focus {
+          box-shadow:
+            inset 0 0 0 2px rgba(183, 28, 28, 0.8),
+            0 0 0 4px rgba(255, 120, 120, 0.35),
+            0 18px 44px rgba(183, 28, 28, 0.45);
+        }
+
+
+
+        /* Mobile */
+        @media (max-width: 768px) {
+          .bb-controls {
+            padding: 14px;
+          }
+          .bb-controls input,
+          .bb-controls select {
+            width: 100%;
+            min-width: unset;
+          }
+        }
+
+
+        .bank-card {
+          background: linear-gradient(
+            135deg,
+            rgba(255,255,255,0.6),
+            rgba(255,220,220,0.45)
+          );
+          border-radius:16px;
+          padding:18px;
+          margin-bottom:14px;
+          cursor:pointer;
+          box-shadow:0 12px 32px rgba(0,0,0,0.15);
+          transition:.25s ease;
+        }
+
+        .bank-card:hover {
+          transform: translateY(-4px) scale(1.02);
+          box-shadow:0 20px 45px rgba(0,0,0,0.25);
+          backdrop-filter: blur(4px);
+        }
+
+        .bank-name {
+          font-size:20px;
+          font-weight:800;
+          color:#b71c1c;
+        }
+
+        .expand-box {
+          margin-top:14px;
+          padding:14px;
+          border-radius:12px;
+          background:rgba(255,246,246,0.65);
+        }
+
+        table {
+          width:100%;
+        }
+
+        td {
+          padding:6px 4px;
+        }
+      `}</style>
+
+      <div className="bb-page">
+        <div ref={mountRef} className="bb-bg" />
+
+        <div className="bb-content">
+          <div className="bb-title">🏥 Blood Banks</div>
+
+          <div className="bb-controls">
+            <input
+              type="text"
+              placeholder="🔍 Search blood banks by name"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+
+            <select value={sortOption} onChange={e => setSortOption(e.target.value)}>
+              <option value="name">🔤 Sort by Name</option>
+              <option value="units">🩸 Sort by Available Units</option>
+            </select>
+          </div>
+
+
+          {filteredBanks.map(b => {
+            const total = Object.values(b.stock).reduce((a, c) => a + c, 0);
+            const dist = userLocation
+              ? calcDistanceKm(
+                  userLocation.lat,
+                  userLocation.lng,
+                  b.location.coordinates
+                ).toFixed(1) + " km"
+              : "—";
+
+            return (
+              <div
+                key={b._id}
+                className="bank-card"
+                onClick={() =>
+                  setExpanded(p => ({ ...p, [b._id]: !p[b._id] }))
+                }
+              >
+                <div style={{ display:"flex", justifyContent:"space-between" }}>
+                  <div>
+                    <div className="bank-name">{b.name}</div>
+                    <div className="small text-muted">{b.address}</div>
+                    <div className="small">📞 {b.contact}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <strong>{fmt(total)}</strong> units
+                    <div className="small text-muted">{dist}</div>
+                  </div>
+                </div>
+
+                {expanded[b._id] && (
+                  <div className="expand-box">
+                    <table>
+                      <tbody>
+                        {Object.entries(b.stock).map(([g,c]) => (
+                          <tr key={g}>
+                            <td><strong>{g}</strong></td>
+                            <td style={{ textAlign:"right" }}>{c}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <a
+                      href={`https://www.google.com/maps?q=${b.location.coordinates[1]},${b.location.coordinates[0]}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      📍 View on Google Maps
+                    </a>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}

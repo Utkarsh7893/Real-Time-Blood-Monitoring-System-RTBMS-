@@ -1,0 +1,20 @@
+* Project Title: Real Time Blood Managing System (RTBMS)
+
+
+___________________________________________________________|
+Group Member's :                                           |
+Registration Number.          Name           Roll Number.  |
+12306246(Admin)            Utkarsh Raj          35         |
+12300805               Akshay Pratap Singh      48         |
+12316366                   Ankit Kumar          __         |
+___________________________________________________________|
+
+Project Description:
+
+Our Aim is modernizing the facility of donating blood and finding
+donors as soon as possible so that no one suffers in the case of urgency.
+For the same, we want to develop an __ that will contain the real time 
+database of all the blood banks in your locality stating the units of
+blood available with its characteristics, real time requisition for 
+blood by individuals. The user can track the nearby hospitals/blood 
+banks and even the events being conducted by them with the help of geo-tracking.
